@@ -21,7 +21,6 @@ class CryptoTool:
         """
         self.key = key_string.encode('utf-8')
         if len(self.key) != 16:
-             # 简单处理：如果不是16位，可能需要调整，这里暂时保持原样或报错
              pass
 
         self.fixed_iv = None
@@ -31,7 +30,6 @@ class CryptoTool:
                 raise ValueError("IV must be exactly 16 bytes long.")
 
         # 定义操作映射表
-        # key: (加密函数, 解密函数)
         self.operations = {
             "101": (self._gzip_encrypt, self._gzip_decrypt),   # GZIP
             "1001": (self._aes_encrypt, self._aes_decrypt),    # AES
@@ -69,17 +67,9 @@ class CryptoTool:
     # ================= 通用处理流程 =================
 
     def run_pipeline(self, data, config_str, is_encrypt=True):
-        """
-        执行通用管道处理
-        :param data: 输入数据 (str 或 bytes)
-        :param config_str: 配置字符串，如 "101,1001,-999"
-        :param is_encrypt: True为加密，False为解密
-        :return: 结果 (通常是 str 或 bytes)
-        """
         # 1. 解析配置
         steps = [s.strip() for s in config_str.split(',')]
         
-        # 如果是解密，步骤需要反转 (例如: Base64解密 -> AES解密 -> GZIP解压)
         if not is_encrypt:
             steps = list(reversed(steps))
 
@@ -106,16 +96,13 @@ class CryptoTool:
                 return None
 
         # 4. 结果处理
-        # 如果是加密，且最后一步是 Base64，通常返回字符串
         if is_encrypt and steps[-1] == "-999":
             return current_data.decode('utf-8')
         
-        # 如果是解密，通常期望变回原始字符串
         if not is_encrypt:
             try:
                 return current_data.decode('utf-8')
             except UnicodeDecodeError:
-                # 如果解密结果不是文本（比如解密了一半），返回 bytes
                 return current_data
         
         return current_data
@@ -126,6 +113,178 @@ class CryptoTool:
     def decrypt(self, enc_data, config_str="101,1001,-999"):
         return self.run_pipeline(enc_data, config_str, is_encrypt=False)
 
+def run_gui(tool):
+    """启动图形化界面"""
+    import tkinter as tk
+    from tkinter import scrolledtext, messagebox
+    from tkinter import font as tkfont
+
+    # --- 颜色主题配置 (极简黑白灰 + 莫兰迪色) ---
+    COLOR_BG = "#F9F9F9"          # 极浅的灰白背景
+    COLOR_FRAME_BG = "#FFFFFF"    # 纯白卡片
+    
+    COLOR_BTN_ENC = "#333333"     # 加密：深灰
+    COLOR_BTN_ENC_HOVER = "#555555"
+    
+    COLOR_BTN_DEC = "#78909C"     # 解密：蓝灰
+    COLOR_BTN_DEC_HOVER = "#90A4AE"
+
+    COLOR_BTN_CLEAR = "#E0E0E0"   # 清空：浅灰
+    COLOR_BTN_CLEAR_HOVER = "#BDBDBD"
+    COLOR_BTN_CLEAR_TEXT = "#666666"
+
+    COLOR_TEXT = "#2C3E50"        # 深蓝灰文字
+    COLOR_TEXT_LIGHT = "#95A5A6"  # 浅灰说明文字
+    COLOR_BORDER = "#EEEEEE"      # 极淡的边框
+    
+    FONT_FAMILY = "Microsoft YaHei UI" 
+    
+    window = tk.Tk()
+    window.title("Ad Tools Crypto")
+    window.geometry("800x650")
+    window.configure(bg=COLOR_BG)
+
+    # 自定义字体
+    title_font = tkfont.Font(family=FONT_FAMILY, size=11, weight="bold")
+    normal_font = tkfont.Font(family=FONT_FAMILY, size=10)
+    code_font = tkfont.Font(family="Consolas", size=10)
+
+    # --- 顶部配置区域 ---
+    frame_top = tk.Frame(window, bg=COLOR_FRAME_BG, padx=20, pady=15)
+    frame_top.pack(fill=tk.X, padx=15, pady=(15, 10))
+    frame_top.configure(highlightbackground=COLOR_BORDER, highlightthickness=1)
+
+    tk.Label(frame_top, text="加密流程配置 (Config):", font=title_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT).pack(anchor=tk.W)
+    tk.Label(frame_top, text="101=GZIP, 1001=AES, -999=Base64 (逗号分隔)", font=normal_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT_LIGHT).pack(anchor=tk.W, pady=(2, 5))
+
+    entry_config = tk.Entry(frame_top, font=code_font, bg="#FAFAFA", fg=COLOR_TEXT, relief="flat", highlightthickness=1, highlightbackground=COLOR_BORDER)
+    entry_config.insert(0, "101,1001,-999")
+    entry_config.pack(fill=tk.X, ipady=5)
+
+    # --- 中间输入区域 ---
+    frame_mid = tk.Frame(window, bg=COLOR_BG)
+    frame_mid.pack(fill=tk.BOTH, expand=True, padx=15)
+
+    frame_input = tk.Frame(frame_mid, bg=COLOR_FRAME_BG, padx=15, pady=10)
+    frame_input.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+    frame_input.configure(highlightbackground=COLOR_BORDER, highlightthickness=1)
+
+    # 标题栏加一个清空按钮
+    frame_input_header = tk.Frame(frame_input, bg=COLOR_FRAME_BG)
+    frame_input_header.pack(fill=tk.X, pady=(0, 5))
+    
+    tk.Label(frame_input_header, text="输入内容 (Input):", font=title_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT).pack(side=tk.LEFT)
+    
+    def clear_input():
+        text_input.delete("1.0", tk.END)
+
+    btn_clear_in = tk.Button(frame_input_header, text="清空", command=clear_input,
+                             font=normal_font, bg=COLOR_BTN_CLEAR, fg=COLOR_BTN_CLEAR_TEXT,
+                             activebackground=COLOR_BTN_CLEAR_HOVER, relief="flat", cursor="hand2",
+                             padx=10, pady=0)
+    btn_clear_in.pack(side=tk.RIGHT)
+
+    text_input = scrolledtext.ScrolledText(frame_input, height=8, font=normal_font, bg="#FAFAFA", relief="flat", padx=5, pady=5)
+    text_input.pack(fill=tk.BOTH, expand=True)
+    text_input.configure(highlightthickness=1, highlightbackground=COLOR_BORDER)
+
+    # --- 按钮区域 ---
+    frame_btns = tk.Frame(window, bg=COLOR_BG)
+    frame_btns.pack(fill=tk.X, padx=15, pady=5)
+
+    def create_btn(parent, text, command, bg_color, hover_color, text_color="white"):
+        btn = tk.Button(parent, text=text, command=command, 
+                        font=title_font, 
+                        bg=bg_color, 
+                        fg=text_color, 
+                        activebackground=hover_color, 
+                        activeforeground=text_color,
+                        relief="flat", 
+                        cursor="hand2",
+                        width=15,
+                        pady=6)
+        return btn
+
+    def on_encrypt():
+        content = text_input.get("1.0", tk.END).strip()
+        cfg = entry_config.get().strip()
+        if not content:
+            messagebox.showwarning("提示", "请输入需要加密的内容")
+            return
+        
+        try:
+            result = tool.encrypt(content, cfg)
+            text_output.delete("1.0", tk.END)
+            if result is None:
+                text_output.insert(tk.END, "Encryption Failed (Check console for details)")
+            else:
+                text_output.insert(tk.END, result)
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def on_decrypt():
+        content = text_input.get("1.0", tk.END).strip()
+        cfg = entry_config.get().strip()
+        if not content:
+            messagebox.showwarning("提示", "请输入需要解密的内容")
+            return
+        
+        try:
+            result = tool.decrypt(content, cfg)
+            text_output.delete("1.0", tk.END)
+            if result is None:
+                text_output.insert(tk.END, "Decryption Failed (Check console for details)")
+            else:
+                if isinstance(result, bytes):
+                    text_output.insert(tk.END, f"[Binary Data]: {result}")
+                else:
+                    text_output.insert(tk.END, result)
+        except Exception as e:
+            messagebox.showerror("错误", str(e))
+
+    def clear_all():
+        text_input.delete("1.0", tk.END)
+        text_output.delete("1.0", tk.END)
+
+    frame_btn_center = tk.Frame(frame_btns, bg=COLOR_BG)
+    frame_btn_center.pack()
+    
+    btn_enc = create_btn(frame_btn_center, "加密 (Encrypt)", on_encrypt, COLOR_BTN_ENC, COLOR_BTN_ENC_HOVER)
+    btn_enc.pack(side=tk.LEFT, padx=10)
+    
+    btn_dec = create_btn(frame_btn_center, "解密 (Decrypt)", on_decrypt, COLOR_BTN_DEC, COLOR_BTN_DEC_HOVER)
+    btn_dec.pack(side=tk.LEFT, padx=10)
+
+    # 底部大清空按钮
+    btn_clear_all = create_btn(frame_btn_center, "全部清空", clear_all, COLOR_BTN_CLEAR, COLOR_BTN_CLEAR_HOVER, COLOR_BTN_CLEAR_TEXT)
+    btn_clear_all.pack(side=tk.LEFT, padx=10)
+
+    # --- 底部输出区域 ---
+    frame_output = tk.Frame(window, bg=COLOR_FRAME_BG, padx=15, pady=10)
+    frame_output.pack(fill=tk.BOTH, expand=True, padx=15, pady=(10, 15))
+    frame_output.configure(highlightbackground=COLOR_BORDER, highlightthickness=1)
+
+    # 输出区标题栏
+    frame_out_header = tk.Frame(frame_output, bg=COLOR_FRAME_BG)
+    frame_out_header.pack(fill=tk.X, pady=(0, 5))
+
+    tk.Label(frame_out_header, text="输出结果 (Output):", font=title_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT).pack(side=tk.LEFT)
+    
+    def clear_output():
+        text_output.delete("1.0", tk.END)
+
+    btn_clear_out = tk.Button(frame_out_header, text="清空", command=clear_output,
+                             font=normal_font, bg=COLOR_BTN_CLEAR, fg=COLOR_BTN_CLEAR_TEXT,
+                             activebackground=COLOR_BTN_CLEAR_HOVER, relief="flat", cursor="hand2",
+                             padx=10, pady=0)
+    btn_clear_out.pack(side=tk.RIGHT)
+    
+    text_output = scrolledtext.ScrolledText(frame_output, height=8, font=normal_font, bg="#FAFAFA", relief="flat", padx=5, pady=5)
+    text_output.pack(fill=tk.BOTH, expand=True)
+    text_output.configure(highlightthickness=1, highlightbackground=COLOR_BORDER)
+
+    window.mainloop()
+
 if __name__ == "__main__":
     if not HAS_CRYPTO:
         sys.exit(1)
@@ -133,29 +292,9 @@ if __name__ == "__main__":
     # 配置
     my_secret_key = "8iuaKct.PMN38!!1"
     my_iv = "abcdefghijk1mnop"
-    
-    # 这里的 config 代表：先GZIP(101)，再AES(1001)，最后Base64(-999)
-    # 解密时会自动反向：先Base64解，再AES解，最后GZIP解
-    config = "101,1001,-999"
 
     tool = CryptoTool(my_secret_key, iv_string=my_iv)
 
-    # 测试数据 (JSON字符串)
-    original_text = """{"update":{"version":"5e9e344f9e4163c9e0d23dd727810216","checkInterval":60000,"expireTime":1800000,"maxExpireTime":36000000},"requestUrl":{"configUrl":"http://sdk-api.adn-plus.com.cn/api/v3/cfg/getConfig","adUrl":"http://sdk-api.adn-plus.com.cn/api/v3/ad/getAd","version":"32460925cc0ff5772ef919b1932f9832"},"logStrategy":{"acceptEncrypt":"101,1001","customData":"","event":[{"codes":["100.000","100.200","100.500","200.000","250.000","250.200","250.500","260.000","260.200","260.500","270.000","270.200","270.201","280.200","280.201","290.000"],"uploadUrl":"http://sdk-event.beizi.biz/v2/api/adn/sdk/log","level":[],"count":1,"time":"10000","sample":100}],"version":"c189fe16bc05ea0d101e6cd4fe86377f","customId":"adn","crash":{"close":0,"url":"http://sdk-event.beizi.biz/v2/api/adn/crash/log"}}"""
-    print(f"Original: {original_text}")
-    print(f"Config: {config}")
-
-    # 加密
-    encrypted_text = tool.encrypt(original_text,config)
-    print(f"\nEncrypted Result: {encrypted_text}")
-
-    # 解密
-    encrypted_text_me = """eE2kxWEKipl5a894z/gwu1yhoflZxhdyByDOKniRg6yLrSaQ+Vglx/euk0DgMxp8IbYmsBNvFBlPzBV1QkD9wR1pCQvIaZAgMe7abxCS+HjsXTUkCJZ0/FC3y5oIoouAYcZfufJet/46z4d4ZUw/iyUJBByMcNbnMG8L7a8ZlIL2ewlH8830GglIu0g4q9OvrcnFJwPYf2x1T7yksVmHlnWIudOtV0to9uhMmL6AEiWFPF7e2m8Jrhs4GY5cXqfz4K6wXiTy4n7xkT3GqxaLOitaW/DL/rs2aPy33NHIgC3DEIepM9znVy8P4ci2GPg9xO7q1iij4SItlYvtZ6KKIgf9n1dA0cZSqH5LZmnlBAna+XjD/fT/cqPalQozFGbAUU5myCMgWz343DhrfhQmhtjSAxkGpYRD0/wGjgRODm6IyNCQOxWNYhv4Gn3hmF3P+IJasdE7k+ZHgQJvwYQB3l79U1ghlA/uyxqDNGlIzimPU0vJwMnh8ntivwfgUWOv/nl5x8Z1uVCWZEUe8uC6ObqrQ9LED8aCxH/0mBSxMh8WrZgAetbA7uaHzajPhYXzG57aXuYugYkdHePiGNTswhNAbA0DsW95HOn6wcx880A="""
-    decrypted_text = tool.decrypt(encrypted_text_me, config)
-    print(f"\nDecrypted Result: {decrypted_text}")
-    
-    # 验证
-    if original_text == decrypted_text:
-        print("\nVerification Successful!")
-    else:
-        print("\nVerification Failed!")
+    # 启动图形界面
+    print("Starting GUI...")
+    run_gui(tool)
