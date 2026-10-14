@@ -37,7 +37,7 @@ class CryptoGUI:
         frame_top.configure(highlightbackground=COLOR_BORDER, highlightthickness=1)
 
         tk.Label(frame_top, text="加密流程配置 (Config):", font=self.title_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT).pack(anchor=tk.W)
-        tk.Label(frame_top, text="101=GZIP, 1001=AES, -999=Base64 (逗号分隔)", font=self.normal_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT_LIGHT).pack(anchor=tk.W, pady=(2, 5))
+        tk.Label(frame_top, text="101=GZIP, 1001=AES, 1002=动态AES, -999=Base64 (逗号分隔)；v4: 1002,101,-999", font=self.normal_font, bg=COLOR_FRAME_BG, fg=COLOR_TEXT_LIGHT).pack(anchor=tk.W, pady=(2, 5))
 
         self.entry_config = tk.Entry(frame_top, font=self.code_font, bg="#FAFAFA", fg=COLOR_TEXT, relief="flat", highlightthickness=1, highlightbackground=COLOR_BORDER)
         # 默认初始值 (Tab 0 - Text)
@@ -110,6 +110,21 @@ class CryptoGUI:
         self._create_btn(frame_center, "解密 (Decrypt)", self._on_decrypt_text, COLOR_BTN_DEC, COLOR_BTN_DEC_HOVER).pack(side=tk.LEFT, padx=10)
         self._create_btn(frame_center, "全部清空", self._clear_all_text, COLOR_BTN_CLEAR, COLOR_BTN_CLEAR_HOVER, COLOR_BTN_CLEAR_TEXT).pack(side=tk.LEFT, padx=10)
 
+        # 密文格式：字符串 / 流(Hex)。加密时决定输出格式，解密时决定输入按什么解析
+        frame_mode = tk.Frame(frame_btns, bg=COLOR_BG)
+        frame_mode.pack(pady=(8, 0))
+        tk.Label(frame_mode, text="密文格式:", font=self.normal_font, bg=COLOR_BG, fg=COLOR_TEXT).pack(side=tk.LEFT)
+        self.cipher_mode = tk.StringVar(value="str")
+        for text, value in (("字符串", "str"), ("流 (Hex 字节)", "bytes")):
+            tk.Radiobutton(frame_mode, text=text, variable=self.cipher_mode, value=value, font=self.normal_font,
+                           bg=COLOR_BG, fg=COLOR_TEXT, activebackground=COLOR_BG, selectcolor=COLOR_FRAME_BG,
+                           command=self._on_cipher_mode_change).pack(side=tk.LEFT, padx=6)
+        self.btn_save_bytes = tk.Button(frame_mode, text="保存流为文件", command=self._save_bytes_output,
+                                        font=self.normal_font, bg=COLOR_BTN_CLEAR, fg=COLOR_BTN_CLEAR_TEXT,
+                                        relief="flat", cursor="hand2", state=tk.DISABLED)
+        self.btn_save_bytes.pack(side=tk.LEFT, padx=(12, 0))
+        self.last_bytes_output = None
+
         # 输出区
         frame_output = tk.Frame(tab_text, bg=COLOR_FRAME_BG, padx=15, pady=10)
         frame_output.pack(fill=tk.BOTH, expand=True, pady=(10, 15))
@@ -131,9 +146,17 @@ class CryptoGUI:
         cfg = self.entry_config.get().strip()
         if not content: return messagebox.showwarning("提示", "请输入内容")
         try:
-            result = self.tool.encrypt(content, cfg)
+            as_bytes = self.cipher_mode.get() == "bytes"
+            result = self.tool.encrypt(content, cfg, as_bytes=as_bytes)
             self.text_output.delete("1.0", tk.END)
-            self.text_output.insert(tk.END, result if result is not None else "Failed")
+            self._set_bytes_output(None)
+            if result is None:
+                self.text_output.insert(tk.END, "Failed")
+            elif as_bytes:
+                self._set_bytes_output(result)
+                self.text_output.insert(tk.END, f"[Stream {len(result)} bytes]\n{self.tool.bytes_to_hex(result)}")
+            else:
+                self.text_output.insert(tk.END, result if isinstance(result, str) else f"[Binary Data]: {result}")
         except Exception as e: messagebox.showerror("错误", str(e))
 
     def _on_decrypt_text(self):
@@ -141,8 +164,11 @@ class CryptoGUI:
         cfg = self.entry_config.get().strip()
         if not content: return messagebox.showwarning("提示", "请输入内容")
         try:
+            if self.cipher_mode.get() == "bytes":
+                content = self.tool.hex_to_bytes(content)
             result = self.tool.decrypt(content, cfg)
             self.text_output.delete("1.0", tk.END)
+            self._set_bytes_output(None)
             if result is None: self.text_output.insert(tk.END, "Failed")
             else: 
                 if isinstance(result, str):
@@ -153,12 +179,29 @@ class CryptoGUI:
                     except:
                         self.text_output.insert(tk.END, result)
                 else:
-                    self.text_output.insert(tk.END, f"[Binary Data]: {result}")
+                    self._set_bytes_output(result)
+                    self.text_output.insert(tk.END, f"[Binary {len(result)} bytes]\n{self.tool.bytes_to_hex(result)}")
         except Exception as e: messagebox.showerror("错误", str(e))
+
+    def _on_cipher_mode_change(self):
+        self._set_bytes_output(None)
+
+    def _set_bytes_output(self, data):
+        self.last_bytes_output = data
+        self.btn_save_bytes.config(state=tk.NORMAL if data else tk.DISABLED)
+
+    def _save_bytes_output(self):
+        if not self.last_bytes_output: return
+        path = filedialog.asksaveasfilename(initialfile="output.bin", defaultextension=".bin")
+        if not path: return
+        with open(path, 'wb') as f:
+            f.write(self.last_bytes_output)
+        messagebox.showinfo("成功", f"已保存 {len(self.last_bytes_output)} bytes 到 {path}")
 
     def _clear_all_text(self):
         self.text_input.delete("1.0", tk.END)
         self.text_output.delete("1.0", tk.END)
+        self._set_bytes_output(None)
 
     # ================= Tab 2: 文件处理 =================
     def _create_file_tab(self):

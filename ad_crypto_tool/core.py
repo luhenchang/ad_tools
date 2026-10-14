@@ -38,6 +38,7 @@ class CryptoTool:
         self.operations = {
             "101": (self._gzip_encrypt, self._gzip_decrypt),   # GZIP
             "1001": (self._aes_encrypt, self._aes_decrypt),    # AES
+            "1002": (self._aes_embedded_encrypt, self._aes_embedded_decrypt),  # 动态 AES（key/iv 嵌入密文）
             "-999": (self._base64_encrypt, self._base64_decrypt) # Base64
         }
 
@@ -59,6 +60,49 @@ class CryptoTool:
         cipher = AES.new(self.key, AES.MODE_CBC, self.fixed_iv)
         return unpad(cipher.decrypt(data), AES.block_size)
 
+    # 1002：每次随机 key/iv，AES-128/CBC/PKCS7
+    # 输出格式: [mixedData][ivPos 4 字节大端序]
+    #   keyPos = ivLast2 % (len(ciphertext) + 1)，把 key 插入密文得到 combined
+    #   ivPos  = 随机 4 字节 % (len(combined) + 1)，把 iv 插入 combined 得到 mixedData
+    _EMBED_KEY_LEN = 16
+    _EMBED_IV_LEN = 16
+    _EMBED_IV_POS_LEN = 4
+
+    def _aes_embedded_encrypt(self, data: bytes) -> bytes:
+        key = os.urandom(self._EMBED_KEY_LEN)
+        iv = os.urandom(self._EMBED_IV_LEN)
+        ciphertext = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(data, AES.block_size))
+
+        iv_last2 = (iv[14] << 8) | iv[15]
+        key_pos = iv_last2 % (len(ciphertext) + 1)
+        combined = ciphertext[:key_pos] + key + ciphertext[key_pos:]
+
+        iv_pos = int.from_bytes(os.urandom(4), 'big') % (len(combined) + 1)
+        mixed = combined[:iv_pos] + iv + combined[iv_pos:]
+        return mixed + iv_pos.to_bytes(self._EMBED_IV_POS_LEN, 'big')
+
+    def _aes_embedded_decrypt(self, data: bytes) -> bytes:
+        min_len = self._EMBED_IV_POS_LEN + self._EMBED_IV_LEN + self._EMBED_KEY_LEN
+        if len(data) < min_len:
+            raise ValueError("1002: invalid encrypted data length")
+
+        iv_pos = int.from_bytes(data[-self._EMBED_IV_POS_LEN:], 'big')
+        mixed = data[:-self._EMBED_IV_POS_LEN]
+        if iv_pos + self._EMBED_IV_LEN > len(mixed):
+            raise ValueError("1002: ivPos out of range")
+
+        iv = mixed[iv_pos:iv_pos + self._EMBED_IV_LEN]
+        combined = mixed[:iv_pos] + mixed[iv_pos + self._EMBED_IV_LEN:]
+
+        iv_last2 = (iv[14] << 8) | iv[15]
+        key_pos = iv_last2 % (len(combined) - self._EMBED_KEY_LEN + 1)
+        if key_pos + self._EMBED_KEY_LEN > len(combined):
+            raise ValueError("1002: keyPos out of range")
+
+        key = combined[key_pos:key_pos + self._EMBED_KEY_LEN]
+        ciphertext = combined[:key_pos] + combined[key_pos + self._EMBED_KEY_LEN:]
+        return unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(ciphertext), AES.block_size)
+
     def _base64_encrypt(self, data: bytes) -> bytes:
         return base64.b64encode(data)
 
@@ -67,7 +111,19 @@ class CryptoTool:
 
     # ================= 通用处理流程 =================
 
-    def run_pipeline(self, data, config_str, is_encrypt=True):
+    @staticmethod
+    def bytes_to_hex(data: bytes, per_line: int = 16) -> str:
+        return "\n".join(data[i:i + per_line].hex(' ') for i in range(0, len(data), per_line))
+
+    @staticmethod
+    def hex_to_bytes(text: str) -> bytes:
+        cleaned = text.replace("0x", "").replace("0X", "").replace(",", " ")
+        cleaned = "".join(cleaned.split())
+        if len(cleaned) % 2 != 0:
+            raise ValueError("Hex 长度必须为偶数")
+        return bytes.fromhex(cleaned)
+
+    def run_pipeline(self, data, config_str, is_encrypt=True, as_bytes=False):
         # 1. 解析配置
         steps = [s.strip() for s in config_str.split(',')]
         
@@ -97,6 +153,9 @@ class CryptoTool:
                 return None
 
         # 4. 结果处理
+        if as_bytes:
+            return current_data
+
         # 如果是加密，且最后一步是 Base64，通常返回字符串
         if is_encrypt and steps[-1] == "-999":
             return current_data.decode('utf-8')
@@ -110,8 +169,8 @@ class CryptoTool:
         
         return current_data
 
-    def encrypt(self, raw_data, config_str):
-        return self.run_pipeline(raw_data, config_str, is_encrypt=True)
+    def encrypt(self, raw_data, config_str, as_bytes=False):
+        return self.run_pipeline(raw_data, config_str, is_encrypt=True, as_bytes=as_bytes)
 
     def decrypt(self, enc_data, config_str):
         return self.run_pipeline(enc_data, config_str, is_encrypt=False)
